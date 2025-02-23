@@ -20,7 +20,7 @@ Interactive UI built with Streamlit
 
 1️⃣ Clone the repository:
 ```
-git clone https://github.com/yourusername/nut-bolt-detector.git
+git clone https://github.com/Himanshu49Gaur/nut-bolt-detector.git
 cd nut-bolt-detector
 ```
 
