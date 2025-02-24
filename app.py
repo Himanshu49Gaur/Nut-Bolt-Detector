@@ -1,114 +1,91 @@
 import streamlit as st
+import os
 import cv2
 import numpy as np
+import torch
 from ultralytics import YOLO
 from PIL import Image
-import os
-import shutil
-import random
 
-# Define paths
-dataset_path = "datasets"
-image_train_path = os.path.join(dataset_path, "images", "train")
-image_val_path = os.path.join(dataset_path, "images", "val")
-label_train_path = os.path.join(dataset_path, "labels", "train")
-label_val_path = os.path.join(dataset_path, "labels", "val")
-data_yaml_path = os.path.join(dataset_path, "data.yaml")
-model_path = "trained_model.pt"
+# Paths
+DATA_DIR = "E:\\Intern\\NUT and Bolts\\UPLOAD"
+MODEL_PATH = "E:\\Intern\\NUT and Bolts\\MODEL\\yolov8m_nut_bolt.pt"
+DATA_YAML = "E:\\Intern\\NUT and Bolts\\data.yaml"
 
-# Ensure dataset structure exists
-os.makedirs(image_train_path, exist_ok=True)
-os.makedirs(image_val_path, exist_ok=True)
-os.makedirs(label_train_path, exist_ok=True)
-os.makedirs(label_val_path, exist_ok=True)
+# Ensure directories exist
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
 
-# Load YOLOv8m model
-if os.path.exists(model_path):
-    model = YOLO(model_path)
-else:
-    model = YOLO("yolov8m.pt")  # Default model
+# Download YOLOv8 model if not present
+def download_yolo():
+    if not os.path.exists("yolov8m.pt"):
+        model = YOLO("yolov8m.pt")  # Download YOLOv8m
 
-# Function to detect nuts and bolts
-def detect_objects(image):
-    img = np.array(image)
-    results = model(img)
-    annotated_img = img.copy()
-    
-    for result in results:
-        for box in result.boxes.xyxy:
-            x1, y1, x2, y2 = map(int, box[:4])
-            cv2.rectangle(annotated_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            label = "Nut" if result.boxes.cls[0] == 0 else "Bolt"
-            cv2.putText(annotated_img, label, (x1, y1 - 10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-    
-    return annotated_img, results
+download_yolo()
 
-# Function to create data.yaml dynamically
-def create_data_yaml():
-    data_yaml_content = f"""
-path: {os.path.abspath(dataset_path)}
-train: {os.path.abspath(image_train_path)}
-val: {os.path.abspath(image_val_path)}
-
-nc: 2
-names: ["Nut", "Bolt"]
-"""
-    with open(data_yaml_path, "w") as f:
-        f.write(data_yaml_content)
-    st.success("✅ data.yaml created successfully!")
-
-# Function to train the model
 def train_model():
-    if not os.path.exists(data_yaml_path):
-        create_data_yaml()
-    st.write("🔄 Training the model on uploaded images...")
-    model.train(data=data_yaml_path, epochs=5, imgsz=640, save=True, project="runs/train")
-    st.success("✅ Training complete! Model saved.")
-    os.rename("runs/train/exp/weights/best.pt", model_path)
+    st.write("Training YOLOv8m on Nut & Bolt dataset...")
+    model = YOLO("yolov8m.pt")
+    model.train(data=DATA_YAML, epochs=50, imgsz=640, batch=8, device='cuda' if torch.cuda.is_available() else 'cpu')
+    os.rename("runs/detect/train/weights/best.pt", MODEL_PATH)
+    st.success("Model trained and saved!")
+
+# Load trained model
+if os.path.exists(MODEL_PATH):
+    model = YOLO(MODEL_PATH)
+else:
+    st.warning("No trained model found. Please train the model first.")
+    model = None
+
+def detect_objects(image):
+    if model is None:
+        st.error("Model is not loaded. Please train YOLOv8m first.")
+        return [], np.array(image)
+    
+    image_cv = np.array(image)
+    results = model(image_cv)
+    
+    detected_objects = []
+    for result in results:
+        for box in result.boxes:
+            x1, y1, x2, y2 = map(int, box.xyxy[0])  # Bounding box coordinates
+            label = result.names[int(box.cls[0])]
+            width = x2 - x1
+            height = y2 - y1
+            area = width * height  # Calculate area of detected object
+            detected_objects.append((label, x1, y1, x2, y2, width, height, area))
+            
+            # Draw bounding box and label each object separately
+            cv2.rectangle(image_cv, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(image_cv, f"{label}: W={width}px, H={height}px", (x1, y1 - 10), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    return detected_objects, image_cv
 
 # Streamlit UI
-st.title("🔩 Nut & Bolt Detector 🛠️")
-st.sidebar.header("Options")
-option = st.sidebar.radio("Choose Action:", ["Detect", "Train New Model"])
+st.title("🔩 Nut & Bolt Detector with Measurement")
 
-if option == "Detect":
-    uploaded_file = st.file_uploader("Upload an image...", type=["jpg", "png", "jpeg"])
+st.sidebar.header("Options")
+mode = st.sidebar.radio("Choose Mode", ["Train Model", "Detect Objects"])
+
+if mode == "Train Model":
+    uploaded_files = st.file_uploader("Upload training images", accept_multiple_files=True)
+    if uploaded_files:
+        for file in uploaded_files:
+            file_path = os.path.join(DATA_DIR, file.name)
+            with open(file_path, "wb") as f:
+                f.write(file.getbuffer())
+        st.success("Images uploaded successfully!")
+    
+    if st.button("Train YOLOv8m Model"):
+        train_model()
+
+elif mode == "Detect Objects":
+    uploaded_file = st.file_uploader("Upload an image for detection")
     if uploaded_file:
         image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Image", use_container_width=True)
+        detected_objects, output_image = detect_objects(image)
         
-        if st.button("🔍 Detect Objects"):
-            detected_image, results = detect_objects(image)
-            st.image(detected_image, caption="Detection Result", use_container_width=True)
-            
-            st.subheader("🔽 Detection Output:")
-            for result in results:
-                for box, cls in zip(result.boxes.xyxy, result.boxes.cls):
-                    label = "Nut" if cls == 0 else "Bolt"
-                    x1, y1, x2, y2 = map(int, box[:4])
-                    st.write(f"**{label}:** Coordinates ({x1}, {y1}) to ({x2}, {y2})")
-
-elif option == "Train New Model":
-    st.write("📤 Upload images and labels for training.")
-    image_files = st.file_uploader("Upload images...", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
-    label_files = st.file_uploader("Upload corresponding YOLO label files...", type=["txt"], accept_multiple_files=True)
-    
-    if image_files and label_files:
-        for img in image_files:
-            img_folder = image_train_path if random.random() > 0.2 else image_val_path
-            img_path = os.path.join(img_folder, img.name)
-            with open(img_path, "wb") as f:
-                f.write(img.read())
+        st.image(output_image, caption="Detected Objects", use_container_width=True)
         
-        for label in label_files:
-            label_folder = label_train_path if random.random() > 0.2 else label_val_path
-            label_path_file = os.path.join(label_folder, label.name)
-            with open(label_path_file, "wb") as f:
-                f.write(label.read())
-        
-        st.success("✅ Images and labels uploaded successfully.")
-    
-    if st.button("📈 Train Model"):
-        create_data_yaml()
-        train_model()
+        for obj in detected_objects:
+            label, x1, y1, x2, y2, width, height, area = obj
+            st.success(f"Detected: {label} - Width: {width}px, Height: {height}px, Area: {area} pixels²")
