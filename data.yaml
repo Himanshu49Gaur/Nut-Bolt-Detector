@@ -1,0 +1,5 @@
+path: E:\Intern\NUT and Bolts\
+train: UPLOAD/Train
+val: UPLOAD/Val
+nc: 2  # Number of classes (e.g., nut and bolt)
+names: ["nut", "bolt"]
