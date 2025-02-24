@@ -1,6 +1,7 @@
 opencv-python-headless
 ultralytics
-torch
 numpy
-pillow
-streamlit
+Pillow
+torch
+torchvision
+torchaudio
